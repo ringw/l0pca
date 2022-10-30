@@ -20,7 +20,7 @@ differential equation.
 import tensorflow as tf
 
 class AnnealingDiffEq(object):
-    def __init__(self, t0):
+    def __init__(self, t0=1.):
         self.t0 = t0
 
     def temperature(self, i):
@@ -38,15 +38,17 @@ class AnnealingDiffEq(object):
         return self.t0 * tf.math.exp(-temperature / self.t0)
 
 class ParameterStrategy(object):
-    def __init__(self, t0) -> None:
-        self.annealing_diff_eq = AnnealingDiffEq(t0)
+    def __init__(self) -> None:
+        self.annealing_diff_eq = AnnealingDiffEq()
 
     def call(self, param, evaluation_fn):
         @tf.custom_gradient
         def custom_gradient_impl(param):
-            def grad(upstream):
+            def grad(upstream, variables=[]):
                 unused_loss, update_ind, update_score = evaluation_fn(param)
-                return upstream * self._update_scatter_backprop(param, update_ind, update_score)
+                return (
+                    upstream * self._update_scatter_backprop(param, update_ind, update_score),
+                    [tf.zeros_like(var) for var in variables])
 
             return evaluation_fn(param)[0], grad
 
