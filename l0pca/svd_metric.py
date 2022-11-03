@@ -2,8 +2,7 @@ import numpy as np
 from l0pca import sampling
 import tensorflow as tf
 
-N_ENSEMBLE = 64
-DATA_FRAC = 0.1
+N_ENSEMBLE = 1024
 
 @tf.function
 def gather_cov(cov, batches):
@@ -31,8 +30,10 @@ def evaluate_cov_eigh(cov, weights, k, ndim, param_formula=None):
     ensembles = tf.reshape(ensembles, [n_ensemble_actual, k])
     ensemble_cov = gather_cov(cov, ensembles)
 
-    n_data = tf.cast(tf.math.ceil(n_features * DATA_FRAC), tf.int32)
-    data_lookup = sampling.weighted_choice_naive(weights, [1, n_data])[0, :]
+    # n_data = tf.cast(tf.math.ceil(n_features * DATA_FRAC), tf.int32)
+    # data_lookup = sampling.weighted_choice_naive(weights, [1, n_data])[0, :]
+    n_data = cov.shape[0]
+    data_lookup = tf.range(cov.shape[0])
 
     # Extract data rows of cov.
     data_rows = tf.gather(cov, data_lookup)
@@ -48,7 +49,7 @@ def evaluate_cov_eigh(cov, weights, k, ndim, param_formula=None):
         tf.tile(data_lookup[:, None], multiples=[1, 2]))
 
     # Loss metric (for graphing).
-    ensemble_evalues, _ = tf.linalg.eigh(ensemble_cov)
+    ensemble_evalues, ensemble_evectors = tf.linalg.eigh(ensemble_cov)
     ensemble_evalues = tf.ensure_shape(
         ensemble_evalues,
         [None, k],
@@ -57,6 +58,8 @@ def evaluate_cov_eigh(cov, weights, k, ndim, param_formula=None):
         tf.linalg.norm(
             tf.sort(ensemble_evalues, axis=1)[:, -1:],
             axis=1))
+    pc_component_stddev = tf.math.reduce_std(
+        tf.math.reduce_min(tf.math.abs(ensemble_evectors[:, -1, :]), axis=1))
     # Now tile the ensemble matrices with one added data feature.
     ensemble_cov = tf.broadcast_to(
         ensemble_cov[None, :, :, :], [n_data, n_ensemble_actual, k, k])
@@ -105,11 +108,16 @@ def evaluate_cov_eigh(cov, weights, k, ndim, param_formula=None):
         return tf.experimental.numpy.nanmean(score, axis=1)
     def log_pulldown(score):
         score = tf.experimental.numpy.nanmean(score, axis=1)
-        return tf.where(score < 1e-12, 0., tf.math.log(score))
+        threshold = 1e-12
+        return tf.where(score < threshold, 0., tf.math.log(score) / -tf.math.log(threshold))
+    def tanh_activation(score):
+        return tf.experimental.numpy.nanmean(
+            tf.math.tanh(score / pc_component_stddev), axis=1)
     param_formula_fn = {
         None: exp_diff,
         'exp_diff': exp_diff,
         'bernoulli': bernoulli,
-        'log_pulldown': log_pulldown
+        'log_pulldown': log_pulldown,
+        'tanh_activation': tanh_activation,
     }[param_formula]
     return loss, data_lookup, param_formula_fn(score)
