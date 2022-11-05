@@ -53,8 +53,33 @@ def update_augmented(matrix, row_index):
         axis=0)
     full_matrix[:, row_index:row_index+2, row_index:row_index+2] = rotation
     matrix = matmul(full_matrix, matrix)
+    return matrix
 
-    rotation2 = undo_rotation_atan2(-matrix[:, row_index, row_index + 1], matrix[:, row_index, row_index])[:, ::-1, ::-1]
+def step_temp_cell(matrix, row_index, column_index):
+    rotation = undo_rotation_atan2(-matrix[:, row_index, column_index], matrix[:, row_index, column_index + 1])
+    full_matrix = np.eye(matrix.shape[MATRIX_ROW_DIM])
+    full_matrix = np.repeat(
+        full_matrix[None, :, :],
+        matrix.shape[BATCH_DIM],
+        axis=0)
+    full_matrix[:, column_index:column_index+2, column_index:column_index+2] = rotation
+    matrix = matmul(matrix, full_matrix)
+
+    row_index -= 2
+    column_index += 1
+    rotation = undo_rotation_atan2(matrix[:, row_index, column_index], matrix[:, row_index + 1, column_index])
+    full_matrix = np.eye(matrix.shape[MATRIX_ROW_DIM])
+    full_matrix = np.repeat(
+        full_matrix[None, :, :],
+        matrix.shape[BATCH_DIM],
+        axis=0)
+    full_matrix[:, row_index:row_index+2, row_index:row_index+2] = rotation
+    matrix = matmul(full_matrix, matrix)
+    return matrix
+
+def terminate_temp_value(matrix):
+    row_index = 0
+    rotation2 = undo_rotation_atan2(-matrix[:, row_index + 1, row_index], matrix[:, row_index + 1, row_index + 1])
     full_matrix_c = np.eye(matrix.shape[MATRIX_ROW_DIM])
     full_matrix_c = np.repeat(
         full_matrix_c[None, :, :],

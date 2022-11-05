@@ -60,49 +60,64 @@ def update_augmented(packed, row_index):
     aug1 = packed[:, 2, row_index]
     aug2 = packed[:, 2, row_index + 1]
     rotate_cols = undo_rotation_atan2(aug1, aug2)
-    data_11 = packed[:, 1, row_index - 1]
-    data_11 = data_11 if row_index > 0 else tf.zeros_like(data_11)
+    # data_11: First diagonal affected.
+    data_11 = packed[:, 0, row_index]
+    # data_12: Off-diagonal (close to zero after previous steps).
+    data_12 = packed[:, 1, row_index]
+    # data_13: Augmented entry (concatenate this column which is not actually
+    # contiguous to the other columns).
+    data_13 = packed[:, 2, row_index]
+    data_21 = tf.zeros_like(data_11)
+    data_22 = packed[:, 0, row_index + 1]
+    # data_23: Augmented entry (remember not contiguous to data_22).
+    data_23 = packed[:, 2, row_index + 1]
+    # Transpose (reverse all dims), so initally column-major order.
     perturbed_dense = tf.convert_to_tensor(
         [
-            [
-                # data_11: It is the previous off-diagonal, or may be out of bounds.
-                data_11,
-                # data_21: This will be our new temp cell, currently sparse.
-                tf.zeros_like(data_11),
-            ],
-            [
-                # data_12: 
-                packed[:, 0, row_index],
-                # data_
-                packed[:, 1, row_index],
-            ],
-            [
-                tf.zeros_like(data_11),
-                packed[:, 0, row_index + 1],
-            ],
-            [
-                packed[:, 2, row_index],
-                packed[:, 2, row_index + 1],
-            ],
+            [data_11, data_21],
+            [data_12, data_22],
+            [data_13, data_23],
         ]
     )
     perturbed_dense = tf.transpose(perturbed_dense)
     perturbed_dense = tf.linalg.matmul(rotate_cols, perturbed_dense)
 
-    # Now rotate on the RHS...
-
-    # Set some fake data so that we can test the throughput into and out of our packed sparse rows.
     packed = update_packed_rows(
         packed,
         row_index,
-        [perturbed_dense[:, 0, 0], perturbed_dense[:, 1, 1]],
-        [perturbed_dense[:, 0, 1], perturbed_dense[:, 1, 2]],
-        [tf.zeros_like(aug1), perturbed_dense[:, 1, 0]],
+        diagonal=[perturbed_dense[:, 0, 0], perturbed_dense[:, 1, 1]],
+        off_diag=[perturbed_dense[:, 0, 1], tf.zeros_like(data_11)],
+        aug=[perturbed_dense[:, 0, 2], perturbed_dense[:, 1, 2]],
     )
-    temp_value = perturbed_dense[:, 0, 2]
-    temp_row = row_index - 1
-    temp_column = row_index + 1
+    temp_value = perturbed_dense[:, 1, 0]
+    temp_row = row_index + 1
+    temp_column = row_index
     return packed, temp_value, temp_row, temp_column
+
+@tf.function
+def terminate_step(packed, temp_value):
+    # Precondition: temp_row == 1.
+    # Precondition: temp_column == 0.
+    # data_11: First diagonal.
+    data_11 = packed[:, 0, 0]
+    data_12 = packed[:, 1, 0]
+    data_21 = temp_value
+    data_22 = packed[:, 0, 1]
+    perturbed_dense = tf.convert_to_tensor(
+        [[data_11, data_21], [data_12, data_22]]
+    )
+    perturbed_dense = tf.transpose(perturbed_dense)
+
+    rotate_rows = undo_rotation_atan2(data_21, data_22)
+    perturbed_dense = tf.linalg.matmul(perturbed_dense, rotate_rows)
+
+    return update_packed_rows(
+        packed,
+        row_index=0,
+        diagonal=[perturbed_dense[:, 0, 0], perturbed_dense[:, 1, 1]],
+        off_diag=[perturbed_dense[:, 0, 1], packed[:, 1, 1]],
+        aug=[packed[:, 2, 0], packed[:, 2, 1]],
+    )
 
 class PackedModule(bidiagonal_module.BidiagonalModule):
     def update_augmented(self, sparse_packed, row_index):
