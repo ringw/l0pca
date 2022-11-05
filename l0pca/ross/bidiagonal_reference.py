@@ -92,14 +92,7 @@ def terminate_temp_value(matrix):
 class ReferenceModule(bidiagonal_module.BidiagonalModule):
     def update_augmented(self, sparse_packed, row_index):
         mat = update_augmented(sparse_to_dense(sparse_packed), row_index)
-        # The -2 off-diagonal on row_index is not in our sparse matrix configuration
-        # and is non-zero, so it needs to be tracked.
-        temp_row = row_index + 1
-        temp_column = row_index - 1
-        if temp_column == -1:
-            temp_cell = bidiagonal_module.TempCell(np.float32(0.), -1, -1)
-        else:
-            temp_cell = bidiagonal_module.TempCell(mat[:, temp_row, temp_column], temp_row, temp_column)
+        temp_cell = bidiagonal_module.TempCell(mat[:, row_index + 1, row_index], row_index=row_index + 1, column_index=row_index)
         return dense_to_sparse(mat), temp_cell
 
     def move_temp_cell(sparse_packed, temp_cell):
