@@ -1,5 +1,6 @@
 import tensorflow as tf
 
+@tf.function(jit_compile=True)
 def pade_zero_find(taylor):
     intercept = taylor[..., 0]
     mat = root_root_zero_matrix(taylor)
@@ -8,6 +9,7 @@ def pade_zero_find(taylor):
         taylor[..., 1:4, None])[..., 0, 0]
     return -intercept / slope
 
+@tf.function(jit_compile=True)
 def root_root_zero_matrix(taylor):
     batch_shape = taylor.shape[:-1]
     return tf.concat(

@@ -33,7 +33,7 @@ class RankOneEigenvaluesTest(unittest.TestCase):
             np.arange(5, 10),
             [8, 4, 4, 3, 1])
 
-    def test_search_eigenvalues(self):
+    def test_eigenvalue_initial_estimate(self):
         prob = SvdProblem(np.random.poisson(self.counts[None, :], [100, 20]))
         vals = prob.run_column_cov_ev([2, 3])
         vecs = prob.run_column_cov_evecs([2, 3])
@@ -46,8 +46,19 @@ class RankOneEigenvaluesTest(unittest.TestCase):
             prob.compute_cov(),
             prob.feature_norm,
             prob.num_row)
-        actual_vals = rank_one_eigenvalues.eigenvalue_search(update_v, tf.math.sqrt(vals))
-        np.testing.assert_almost_equal(actual_vals, expected_vals)
+        actual_vals = rank_one_eigenvalues.eigenvalue_initial_estimate(update_v, tf.math.sqrt(vals))
+        np.testing.assert_almost_equal(actual_vals, expected_vals, decimal=3)
+
+    def test_eigenvalue_initial_estimate_batch(self):
+        data = np.random.normal(size=[7, 8, 100, 5])
+        cov = np.zeros([7, 8, 4, 4])
+        for i in range(cov.shape[0]):
+            for j in range(cov.shape[1]):
+                cov[i, j] = np.cov(data[i, j, :, 0:4].T)
+        vals = np.linalg.eigh(cov)[0]
+        # Use random fake vec instead of the real data column, for now.
+        random_aug_data = np.random.uniform(size=[7, 8, 5])
+        aug_vals_init = rank_one_eigenvalues.eigenvalue_initial_estimate(random_aug_data, np.sqrt(vals))
 
 if __name__ == '__main__':
     unittest.main()
