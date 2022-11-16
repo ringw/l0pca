@@ -2,15 +2,23 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 
-\title{Triangularize Eigenvalues}
+\title{GPU Rank-one Update Eigenvalue Initialization}
+
+\author{Daniel Ringwalt}
 
 \begin{document}
 	
 \maketitle
 
-We have $\Sigma$, which is a diagonal singular values matrix. Our original, full-rank data matrix is augmented with a column of zeros, so $\Sigma$ has rank $n-1$ because the last row and column are zero. For a new column of data, there is a $\mathbb{R}^n$ vector update to the last column of $\Sigma$, and new additional left and right singular vector, to reproduce the data.
+\section{Background}
 
-We can readily compute the sparse matrix $\Sigma^{\prime T} \Sigma^\prime = D^\prime$:
+Positive definite matrices of different sizes are useful in a model where variables can be added or removed. The positive definite matrix is the covariance matrix of some multivariate normal distribution. With data available offline (full data matrix, or precomputed Gram matrix), efficient rank-one updates (adding a data column) have been neglected for sparse PCA models (which use a small subset of variables). From the small data matrix 
+
+Given squared singular values (eigenvalues) accurate to machine precision, the augmented eigenvectors (rotated by the original data's singular vectors) were already computed efficiently from a matrix multiplication identity (Bunch 1978).
+
+We have $\Sigma$, which is a diagonal singular values matrix. Our original, full-rank data matrix is augmented with a column of zeros, so $\Sigma$ has rank $n-1$ because the last row and column are zero. For a new column of data, there is a $\mathbb{R}^n$ vector update $v$ to the last column of $\Sigma$, and new additional left and right singular vector, to reproduce the data. Bunch analyzed the eigenvalues and eigenvectors of $\Sigma^\prime \Sigma^{\prime T} = \Sigma^2 + v v^T$, which is a dense matrix.
+
+Note that the matrix $\Sigma^{\prime T} \Sigma^\prime = D^\prime$ is sparse and positive definite, with the same eigenvalues as Bunch's matrix. It has the following nonzero entries:
 
 $$
 D^\prime =
@@ -22,13 +30,27 @@ w_1 & w_2 & w_3 & w_4
 \end{matrix}\right)
 $$
 
+SVD on sparse $\Sigma^\prime$ was performed by Ross 2008, but assumed a highly rectangular data matrix, so a naive platform-provided SVD on square $\Sigma^\prime$ sufficed. The singular vectors of $\Sigma^\prime$ are dense. We could try to decompose $\Sigma^\prime$ into $n$ rank-one matrices which have orthogonal ranges ($v v^T$ is not orthogonal to the standard basis of $\Sigma$), but we would immediately be dealing with $n$ dense left and right singular vectors. Most useful similarity transformations (e.g. Householder) would also densify the $\Sigma^\prime$ or $D^\prime$ matrix after one or two steps. However, we can multiply $D^\prime$ by $Q_1 D^\prime Q_2$, without explicitly solving for the similarity transformation matrix, preserving the eigenvalues but not the eigenvectors. One Givens rotation from the left side can eliminate $w_1$ while introducing an upper off-diagonal entry, while a Givens rotation from the right side can eliminate the sole upper off-diagonal entry without affecting the $w$ column.
+
+\subsection*{Eigenvalue perturbation}
+
+We have an analytic formula (Bunch 1978) for the eigenvalues of $D^\prime$, $n-1$ of which lie between distinct open intervals found between $0,d_1,d_2,d_3$. We can pigeonhole the largest eigenvalue into the interval $(d_3, \text{Tr } D^\prime)$. Bunch's formula is a rational function with $n$ zeros (where the updated eigenvalues are found) and $n$ poles. Bunch's zero-finding iterative algorithm should be used when there is an initialization for the updated eigenvalues. The initialization should not be separated from the actual updated eigenvalue by a pole. However, various Newton's methods (including Pad\'{e} approximation) can skip over the pole and find a different eigenvalue than intended, even if the initialization was closer to the intended eigenvalue than it is to any other pole or zero. Therefore, the initialization algorithm must be good-quality.
+
+\section{Eigenvalue initialization algorithm}
+
 We can use Givens rotations on both sides to efficiently rotate the entries of $D^\prime$ to upper triangular. We want $n-1$ matrices on the LHS which progressively push down the $w$ entries in the last column. The last column of $D^\prime$ may be isolated, and the effect of the series of Givens rotations will be computed in parallel.
 
-Now, suppose that we have applied a Givens rotation to zero out $D^\prime_{in}$. We need to consider two progressive 2x2 rotations affecting certain diagonal entries: $d_i \to d_i^\prime \to d_i^{\prime\prime}$
+Now, suppose that we have applied a Givens rotation to zero out $D^\prime_{in}$ (the top right entry). We need to consider two progressive 2x2 rotations affecting certain diagonal entries: $d_i \to d_i^\prime \to d_i^{\prime\prime}$
+
+\subsection*{Algorithm for last column Givens rotations}
 
 First, $d_1$ will only have one 2x2 rotation touching it, so initialize $d_1^\prime = d_1$.
 
-Next, consider $d_i, i > 1$. We have an angle: $\sin \theta_i = \frac{w_{i-1}^\prime}{w_i^\prime}$. For $w_2^\prime$, we formed the hypotenuse of the two entries, and by reversing the angle (which is in the first quadrant; both positive), we push $\sin \frac{w_1}{\sqrt{w_1^2+w_2^2}}$ to zero.
+Next, consider $d_i, i > 1$. We have an angle: $\sin \theta_i = \frac{w_{i-1}^\prime}{w_i^\prime}$. For $w_2^\prime$, we formed the hypotenuse of the two entries, and by reversing the angle (which is in the first quadrant; both positive), we push $\sin \frac{w_1}{\sqrt{w_1^2+w_2^2}}$ to zero. After one Givens rotation on the LHS of the matrix, we have $w_2^\prime = \sqrt{w_1^2 + w_2^2}$. On the GPU, we calculate the first non-zero entry of the $w$ column after N Givens rotations, by taking the cumsum of $w_i^2$. Only one value in this array may be used at any given time. We materialize the results, but at any given point in time in our algorithm, 
+
+To simplify this stage, we can apply a diagonal matrix with $1$ or $-1$ entries to the LHS of the matrix first. The $w_i$ entries will be nonnegative, so we have a $0 \le \theta_i \le \frac{\pi}{2}, \cos\theta_i \ge 0, \sin\theta_i \ge 0$.
+
+\subsection*{Intermediate result for diagonal entries}
 
 Apply the 2x2 rotation to the 2x2 block:
 
@@ -120,48 +142,165 @@ d_i^\prime =
 d_{i-1}^\prime \sin\theta_i \sin\phi_i + d_i \cos\theta_i \cos\phi_i
 $$
 
-Note: $\sin \phi_i = r_1 / \sqrt{\ell_1^2 + r_1^2}
-= -d_i w_{i-1} / \sqrt{w_i^{\prime 2} (d_{i-1}^{\prime2} \cos^2 \theta_i + d_i^2 \sin^2 \theta_i)}
-$
+%{Note: $\sin \phi_i = r_1 / \sqrt{\ell_1^2 + r_1^2}
+%= -d_i w_{i-1} / \sqrt{w_i^{\prime 2} (d_{i-1}^{\prime2} \cos^2 \theta_i + d_i^2 \sin^2 \theta_i)}
+%$
+%
+%\subsection*{Approximate solution}
+%
+%Say that we will place the diagonal in ascending order of magnitude, and the value $w_{i-1}^\prime$ which we want to push towards zero keeps growing relative to the next $w_i$ ($|\sin\theta_i|$ is growing, $|\sin\theta_i| > |\cos\theta_i|$). Therefore, it makes the most sense to disregard $d_{i-1}^{\prime2} \cos^2\theta_i$.
+%
+%$$
+%\sin \phi_i
+%\approx
+%-\frac{d_iw_{i-1}}{
+%	w_i^\prime d_i \sin\theta_i
+%}
+%=
+%-\frac{w_{i-1}}{w_{i-1}^\prime}
+%$$
+%
+%$$
+%\cos \phi_i
+%\approx
+%\frac{d_{i-1}^\prime \cos\theta_i}{w_i^\prime d_i \sin\theta_i}
+%=
+%\frac{d_{i-1}^\prime w_i}{d_i w_i^\prime w_{i-1}^\prime}
+%$$
+%
+%Plug this into the closed-form for $d_i^\prime$:
+%
+%$$
+%d_i^\prime
+%=
+%-\frac{d_{i-1}^\prime w_{i-1}}{d_i w_{i-1}^\prime} \frac{w_{i-1}^\prime}{w_i^\prime}
+%+
+%d_i \frac{w_i}{w_i^\prime} \frac{d_{i-1}^\prime w_i}{d_i w_i^\prime w_{i-1}^\prime}
+%=
+%-\frac{d_{i-1}^\prime w_{i-1}}{d_i w_i^\prime} + \frac{d_{i-1}^\prime w_i^2}{w_i^{\prime 2} w_{i-1}^\prime}
+%$$
+%
+%We have a geometric expression:
+%
+%$$
+%d_i^\prime = \left( \frac{w_i^2}{w_i^{\prime2} w_{i-1}^\prime} - \frac{w_{i-1}}{d_i w_i^\prime} \right) d_{i-1}^\prime
+%$$
+%
+%However, an approximate solution is not actually desirable. From Bunch 1978, each eigenvalue is found in an open interval $\lambda_i < \lambda_i^\prime < \lambda_{i+1}$ (or $\lambda_1 = 0$ as an augmented lower bound, Tr $D$ as an augmented upper bound). Our approximation could easily produce some of $n$ eigenvalues outside of the proper interval, and would not be useful to us.
+%
+%\subsection*{Exact solution}}
 
-We need an approximation before continuing. Say that we will place the diagonal in ascending order of magnitude, and the value $w_{i-1}^\prime$ which we want to push towards zero keeps growing relative to the next $w_i$ ($|\sin\theta_i|$ is growing, $|\sin\theta_i| > |\cos\theta_i|$). Therefore, it makes the most sense to disregard $d_{i-1}^{\prime2} \cos^2\theta_i$.
-
-$$
-\sin \phi_i
-\approx
--\frac{d_iw_{i-1}}{
-	w_i^\prime d_i \sin\theta_i
-}
-=
--\frac{w_{i-1}}{w_{i-1}^\prime}
-$$
-
-$$
-\cos \phi_i
-\approx
-\frac{d_{i-1}^\prime \cos\theta_i}{w_i^\prime d_i \sin\theta_i}
-=
-\frac{d_{i-1}^\prime w_i}{d_i w_i^\prime w_{i-1}^\prime}
-$$
-
-Plug this into the closed-form for $d_i^\prime$:
+Multiply through by the hypotenuse of the $\phi_i$ trigonometric functions ($d_{i-1}^{\prime\prime}$).
 
 $$
 d_i^\prime
+\sqrt{d_{i-1}^{\prime2} \cos^2 \theta_i + d_i^2 \sin^2 \theta_i}
 =
--\frac{d_{i-1}^\prime w_{i-1}}{d_i w_{i-1}^\prime} \frac{w_{i-1}^\prime}{w_i^\prime}
+d_{i-1}^\prime r_1 \sin\theta_i + d_i \ell_1 \cos\theta_i
+$$
+
+$$
+d_i^\prime
+\sqrt{d_{i-1}^{\prime2} \cos^2 \theta_i + d_i^2 \sin^2 \theta_i}
+=
+-\frac{d_{i-1}^\prime d_i w_{i-1}}{w_i^\prime}
 +
-d_i \frac{w_i}{w_i^\prime} \frac{d_{i-1}^\prime w_i}{d_i w_i^\prime w_{i-1}^\prime}
+\frac{d_i d_{i-1}^\prime w_i}{w_i^\prime}
 =
--\frac{d_{i-1}^\prime w_{i-1}}{d_i w_i^\prime} + \frac{d_{i-1}^\prime w_i^2}{w_i^{\prime 2} w_{i-1}^\prime}
+\frac{d_i d_{i-1}^\prime}{w_i^\prime} (w_i - w_{i-1})
 $$
 
-We have each term increasing by a ratio:
+Square both sides.
 
 $$
-d_i^\prime = \left( \frac{w_i^2}{w_i^{\prime2} w_{i-1}^\prime} - \frac{w_{i-1}}{d_i w_i^\prime} \right) d_{i-1}^\prime
+d_i^{\prime2}
+=
+\frac{d_i^2 d_{i-1}^{\prime2}}{
+	w_i^{\prime2}
+	(d_{i-1}^{\prime2} \cos^2 \theta_i + d_i^2 \sin^2 \theta_i)
+}
+(w_i - w_{i-1})^2
 $$
 
-% TODO: We have strict constraints, e.g. di < di' < d(i+1). The purpose of this solution is to produce an initial guess strictly contained in each window for each eigenvalue. So, probably want to not actually approximate it.
+Evaluate:
+
+$$
+d_{i-1}^{\prime2} \cos^2 \theta_i + d_i^2 \sin^2 \theta_i
+=
+\frac{d_{i-1}^{\prime2} w_i^2 + d_i^2 w_{i-1}^{\prime2}}{w_i^{\prime2}}
+$$
+
+Therefore, the explicit use of the trigonometric function will be avoided:
+
+$$
+d_i^{\prime2}
+=
+\frac{d_i^2 d_{i-1}^{\prime2}}{
+	d_{i-1}^{\prime2} w_i^2 + d_i^2 w_{i-1}^{\prime2}
+}
+(w_i - w_{i-1})^2
+$$
+
+\subsubsection*{Harmonic mean}
+
+The harmonic mean of two numbers $a,b$ is: $\frac{2ab}{a+b}$. The formula of squared diagonal entries cannot be approximated well by successive harmonic means. However, additional steps are needed - we cannot just take cumulative harmonic means using a parallel algorithm, without weighting/scaling.
+
+Use weighted $\omega_a d_{i-1}^{\prime2}$ and $\omega_b d_i^2$, and find the harmonic mean of this expression.
+
+$$
+\frac{\omega_a + \omega_b}{\frac{\omega_a}{d_{i-1}^{\prime2}} + \frac{\omega_b}{d_i^2}}
+=
+\frac{(\omega_a + \omega_b)d_{i-1}^{\prime2} d_i^2}{\omega_a d_i^2 + \omega_b d_{i-1}^{\prime2}}
+$$
+
+We produce a formula for $1/d_i^{\prime2}$ based on harmonic mean. Take:
+
+$$
+\frac{w_{i-1}^{\prime2}}{d_{i-1}^{\prime2}}, \frac{w_i^2}{d_i^2}
+$$
+
+Then, take the arithmetic sum of these values. For $d_i^{\prime2}$, we have an additional scale factor after taking the harmonic mean:
+
+$$
+d_i^{\prime2} =
+\left(
+	\frac{d_i^2 d_{i-1}^{\prime2} (w_i^2 + w_{i-1}^{\prime2})}{
+		d_{i-1}^{\prime2} w_i^2 + d_i^2 w_{i-1}^{\prime2}
+	}
+\right)
+\left(
+	\frac{(w_i - w_{i-1})^2}{w_i^2 + w_{i-1}^{\prime2}}
+\right)
+$$
+
+Using a relationship between sum of reciprocals and the weighted harmonic mean:
+
+$$
+\frac{1}{d_i^{\prime2}} =
+\left(
+	\frac{w_{i-1}^{\prime2}}{d_{i-1}^{\prime2}} + \frac{w_i^2}{d_i^2}
+\right)
+\left(
+	\frac{(w_i - w_{i-1})^2}{w_i^2 + w_{i-1}^{\prime2}}
+\right)
+$$
+
+On the reciprocals array, there is a weight multiplier which will increase progressive, so that we can take the cumsum of $\frac{1}{d_i^{\prime2}} \Pi_i \text{scale}_i$ (and then divide each result by a normalizing value). The successive weights should use a cumsum in log-space.
+
+\subsection*{Eigenvalue formula}
+
+We found:
+
+$$\lambda_{i-1} = d_{i-1}^{\prime\prime} = \frac{\sqrt{d_{i-1}^{\prime2} w_i + d_i^2 w_{i-1}^\prime}}{w_i^\prime}$$
+
+The final eigenvalue will be calculated from the trace and $n-1$ eigenvalues.
+
+\subsubsection*{Sign of eigenvalue}
+
+During this algorithm, we operated on nonnegative (squared) values. Our system will assert a positive definite matrix (the matrix before rank-one update may be positive semidefinite, but its leading $n-1\text{ x }n-1$ block will be positive definite). We can add additional assertions, analytically finding the phase of $\phi$ element-wise using the arrays created in parallel so far. Therefore, we could find fatal errors such as an eigenvalue which analytically should take the negative square root.
+
+\section{Analysis}
+
+The log, reciprocal, and weighting steps (where the exponent of the weight may grow large) will reduce the significant figures of the true diagonal entries (eigenvalues). We will benchmark our method over covariance matrices taken on random data. Our method's accuracy should have significant figures at least one greater than the relative separation between eigenvalues in the data. This would make it a worthwhile initialization step so that we can assume that Bunch's zero-finding will find the true eigenvalues, to machine precision.
 
 \end{document}
