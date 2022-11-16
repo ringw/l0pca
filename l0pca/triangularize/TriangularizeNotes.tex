@@ -8,43 +8,6 @@
 	
 \maketitle
 
-We have $A^2$ which was a diagonal matrix of size $n-1$ ($A^2_i, i < n$), and is augmented by $v^2_i, 1 \le i \le n$ as last row/column symmetric entries.
-
-In one iteration, we update $v^2$, but in the next iteration, this entry will go to zero.
-
-$$v^{2\prime}_2 = \pm \sqrt{\left(v^{2\prime}_1\right)^2 + \left(v^2_2\right)^2}$$
-
-Calculate $\left(v_i^{2\prime}\right)^2$ using cumsum of $\left(v_i^2\right)^2$ (originally this matrix was formed by squaring another matrix with augmented vector $v$, now we are squaring again).
-
-We wanted $\sin \theta_i$ to drive $v_i^2$ to zero. Then: $\cos \theta_i = \frac{v_2^{2\prime}}{v_2^2}$. $\theta_i$ should have appropriate sign (modulus of $\pi$) so that $\left|v_2^{2\prime}\right|$ grows instead of shrinking.
-
-Consider $A^2_i$ when we update $v^2_i$. There is an intermediate step where $A^2_i$ goes to $A^2_i \cos\theta_i$, and there is an upper off-diagonal in the row above: $A^2_i \sin\theta_i$ (upper off-diagonal must be avoided). We have a 2x2 block:
-
-$$
-M
-\left(\begin{matrix}
-	A^{2^\prime}_{i-1} & 0
-	\\
-	0 & A^{2}_{i}
-\end{matrix}\right)
-=
-\left(\begin{matrix} A^{2^\prime}_{i-1} \sin\theta_i & A^2_i \sin\theta_i \\ A^{2^\prime}_{i-1} \cos\theta_i & A^2_i \cos\theta_i \end{matrix}\right)$$
-
-Next, we need the top-right (upper off-diagonal) to go to zero. The angles would be precomputed in parallel after the first computation, by lining up $A_{i-1}^{2^\prime}$ and $A_i^2$. Applying a Givens rotation on the right (rotation of two elements in the row vector, broadcasted against each row of the matrix), the result is:
-
-$$\left(\begin{matrix}
-	A^{2^\prime}_{i-1} \sin\theta_i & A^2_i \sin\theta_i \\ A^{2^\prime}_{i-1} \cos\theta_i & A^2_i \cos\theta_i
-\end{matrix}\right)
-\left(\begin{matrix}
-	\cos\phi_i & -\sin\phi_i \\
-	\sin\phi_i & \cos\phi_i
-\end{matrix}\right)
-$$
-
-The first row is discarded
-
-\subsection*{try again}
-
 We have $\Sigma$, which is a diagonal singular values matrix. Our original, full-rank data matrix is augmented with a column of zeros, so $\Sigma$ has rank $n-1$ because the last row and column are zero. For a new column of data, there is a $\mathbb{R}^n$ vector update to the last column of $\Sigma$, and new additional left and right singular vector, to reproduce the data.
 
 We can readily compute the sparse matrix $\Sigma^{\prime T} \Sigma^\prime = D^\prime$:
@@ -65,7 +28,7 @@ Now, suppose that we have applied a Givens rotation to zero out $D^\prime_{in}$.
 
 First, $d_1$ will only have one 2x2 rotation touching it, so initialize $d_1^\prime = d_1$.
 
-Next, consider $d_i, i > 1$. We have an angle: $\sin \theta_i = \frac{w_1}{w_2^\prime}$. For $w_2^\prime$, we formed the hypotenuse of the two entries, and by reversing the angle (which is in the first quadrant; both positive), we push $\sin \frac{w_1}{\sqrt{w_1^2+w_2^2}}$ to zero.
+Next, consider $d_i, i > 1$. We have an angle: $\sin \theta_i = \frac{w_{i-1}^\prime}{w_i^\prime}$. For $w_2^\prime$, we formed the hypotenuse of the two entries, and by reversing the angle (which is in the first quadrant; both positive), we push $\sin \frac{w_1}{\sqrt{w_1^2+w_2^2}}$ to zero.
 
 Apply the 2x2 rotation to the 2x2 block:
 
@@ -116,7 +79,7 @@ $$
 \end{matrix}\right)^T
 $$
 
-We expect: $d_{i-1}^{\prime\prime} = \sqrt{\ell_1^2 + r_1^2}$-
+We expect: $d_{i-1}^{\prime\prime} = \sqrt{\ell_1^2 + r_1^2}$
 
 Apply the reverse rotation matrix to the transposed entries:
 
@@ -153,33 +116,52 @@ Using the results of the two rotations:
 
 $$
 d_i^\prime =
+\ell_2 \sin\phi_i + r_2 \cos\phi_i =
 d_{i-1}^\prime \sin\theta_i \sin\phi_i + d_i \cos\theta_i \cos\phi_i
 $$
 
+Note: $\sin \phi_i = r_1 / \sqrt{\ell_1^2 + r_1^2}
+= -d_i w_{i-1} / \sqrt{w_i^{\prime 2} (d_{i-1}^{\prime2} \cos^2 \theta_i + d_i^2 \sin^2 \theta_i)}
+$
+
+We need an approximation before continuing. Say that we will place the diagonal in ascending order of magnitude, and the value $w_{i-1}^\prime$ which we want to push towards zero keeps growing relative to the next $w_i$ ($|\sin\theta_i|$ is growing, $|\sin\theta_i| > |\cos\theta_i|$). Therefore, it makes the most sense to disregard $d_{i-1}^{\prime2} \cos^2\theta_i$.
+
 $$
-d_i^\prime
+\sin \phi_i
+\approx
+-\frac{d_iw_{i-1}}{
+	w_i^\prime d_i \sin\theta_i
+}
 =
-d_{i-1}^\prime
-\frac{w_{i-1}}{w_i^\prime}
-\frac{(-d_i w_{i-1}/w_{i}^{\prime})}{\sqrt{
-		d_{i-1}^{\prime2} \cos^2 \theta_i
-		+ d_i^2 \sin^2 \theta_i
-	}}
-+
-d_i
-\frac{w_i}{w_i^\prime}
-\frac{d_{i-1}^{\prime2} w_i/w_i^\prime}{\sqrt{
-		d_{i-1}^{\prime2} \cos^2 \theta_i
-		+ d_i^2 \sin^2 \theta_i
-}}
+-\frac{w_{i-1}}{w_{i-1}^\prime}
 $$
+
+$$
+\cos \phi_i
+\approx
+\frac{d_{i-1}^\prime \cos\theta_i}{w_i^\prime d_i \sin\theta_i}
+=
+\frac{d_{i-1}^\prime w_i}{d_i w_i^\prime w_{i-1}^\prime}
+$$
+
+Plug this into the closed-form for $d_i^\prime$:
 
 $$
 d_i^\prime
 =
-\frac{
-	d_{i-1}^{\prime2} d_i w_i^2 - d_{i-1}^\prime d_i w_{i-1}^2
-}{}
+-\frac{d_{i-1}^\prime w_{i-1}}{d_i w_{i-1}^\prime} \frac{w_{i-1}^\prime}{w_i^\prime}
++
+d_i \frac{w_i}{w_i^\prime} \frac{d_{i-1}^\prime w_i}{d_i w_i^\prime w_{i-1}^\prime}
+=
+-\frac{d_{i-1}^\prime w_{i-1}}{d_i w_i^\prime} + \frac{d_{i-1}^\prime w_i^2}{w_i^{\prime 2} w_{i-1}^\prime}
 $$
+
+We have each term increasing by a ratio:
+
+$$
+d_i^\prime = \left( \frac{w_i^2}{w_i^{\prime2} w_{i-1}^\prime} - \frac{w_{i-1}}{d_i w_i^\prime} \right) d_{i-1}^\prime
+$$
+
+% TODO: We have strict constraints, e.g. di < di' < d(i+1). The purpose of this solution is to produce an initial guess strictly contained in each window for each eigenvalue. So, probably want to not actually approximate it.
 
 \end{document}
