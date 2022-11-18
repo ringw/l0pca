@@ -1,0 +1,152 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+
+\title{Analytical solution to bidiagonalize rank-one singular values matrix updahe}
+
+\begin{document}
+\maketitle
+
+\section{Rank-one updated singular values matrix}
+
+We start with a singular values diagonal matrix $\Sigma$.
+We can apply different orthogonal matrices ($Q_1 \Sigma Q_2$) to a singular values matrix, because:
+
+$$
+(Q_1 \Sigma Q_2)^T (Q_1 \Sigma Q_2)
+=
+Q_2^T \Sigma^2 Q_2
+=
+Q_2^{-1} \Sigma^2 Q_2
+$$
+
+The resulting matrix is similar to the squared singular values matrix $\Sigma^2$.
+
+\subsection{Rank-one update (more background needed)}
+
+$$
+\Sigma^\prime =
+\left(\begin{matrix}
+    v_1 & 0 & 0 & 0 \\
+    v_2 & d_1 & 0 & 0 \\
+    v_3 & 0 & d_2 & 0 \\
+    v_4 & 0 & 0 & d_3
+\end{matrix}\right)
+$$
+
+\section{Initialization routine: Move one entry to off-diagonal}
+
+At each step, we are going to compute one Givens rotation on the left, and one Givens rotation on the right (they are generally not each other's transpose). Set $A = Q_1 \Sigma^\prime Q_2$. We will assume that $A$ is mutable and the rotated $A$ is being persisted after every rotation.
+
+\subsection{Givens rotation: Review}
+
+Try to set the entry $v_4$ to zero, by rotating $\left(\begin{matrix}v_3\\v_4\end{matrix}\right)$. A Givens rotation on the left will affect the third and fourth entry of every column:
+
+$$
+\left(\begin{matrix}
+    1 & 0 & 0 & 0
+    \\
+    0 & 1 & 0 & 0
+    \\
+    0 & 0 & \cos\theta & -\sin\theta
+    \\
+    0 & 0 & \sin\theta & \cos\theta
+\end{matrix}\right)
+\Sigma^\prime
+$$
+
+We want the inverse rotation matrix to produce:
+
+$$
+\left(\begin{matrix}
+    \cos(-\theta) & -\sin(-\theta) \\
+    \sin(-\theta) & \cos(-\theta)
+\end{matrix}\right)
+\left(\begin{matrix} 0 \\ \sqrt{v_3^2 + v_4^4} \end{matrix}\right)
+=
+\left(\begin{matrix} v_3 \\ v_4 \end{matrix}\right)
+$$
+
+We have $\sin\theta = \frac{v_3}{\sqrt{v_3^2 + v_4^2}}, \cos\theta = \frac{v_4}{\sqrt{v_3^2 + v_4^4}}$.
+
+On the left column of $\Sigma^\prime$, we could add further Givens rotations moving up the matrix, but we would lose the useful sparsity when we spread the diagonal entries around. We have already created a 2x2 bottom-right block which we can assume is now all nonzero.
+
+\subsection{Sparsity invariant}
+
+We just updated $\Sigma^\prime_{31}$ and zeroed $\Sigma^\prime_{41}$, say for this step we use the counter $i = 3$. Next, we are going to examine columns $i$ and $i+1$. We assume that the diagonal entries are nonzero and remain not close to zero after each step. If $i+1 < n$, then column $i+1$ also has a lower off-diagonal entry $a_{i+2,i+1}$.
+
+\subsection{Right-hand side rotation}
+
+Apply a rotation affecting the third and fourth entries in every row (rotating the third column and the fourth column) of:
+
+$$
+A
+=
+\left(\begin{matrix}
+    v_1 & 0 & 0 & 0 \\
+    v_2 & d_1 & 0 & 0 \\
+    v_3^\prime & 0 & d_2^* & x_{34} \\
+    0 & 0 & f_3^* & d_3^* \\
+    \textcolor{lightgray}{0} & \textcolor{lightgray}{0} & \textcolor{lightgray}{0} & \textcolor{lightgray}{0}
+\end{matrix}\right)
+$$
+
+We use a rotation matrix so that $d_2^*$ goes to some $d_2^\prime = \pm \sqrt{d_2^{*2} + x^2}$ (which is the final value that it will attain for this subroutine). In total (if $i + 2 \le n$), then a 3x2 block of the matrix may be affected. Now (if we had hypothetically $n > 4$), we would be storing a single entry $x_{53}$ which is outside of the expected entries in this matrix. However, if $i + 1 = n$, then rows $[i + 1, n]$ are in the bidiagonal format, and the subroutine terminates.
+
+\subsection{Initialization routine closed-form}
+
+The trigonometric parameter $\theta$ could be used, but we will avoid any parameterization of the rotation matrices, and we will simplify the expression later. So far, we have:
+
+$$v_3^\prime = \sqrt{v_3^2 + v_4^2}$$
+
+$$d_2^* = d_2 \cos\theta = \frac{d_2 v_4}{v_3^\prime}$$
+
+$$x_{34} = -d_3 \sin\theta = -\frac{d_3 v_3}{v_3^\prime}$$
+
+$$f_3^* = d_2 \sin\theta = \frac{d_2 v_3}{v_3^\prime}$$
+
+$$d_3^* = d_3 \cos\theta = \frac{d_3 v_4}{v_3^\prime}$$
+
+For now, we will continue with a Givens rotation solved so that we drive the result to a positive square root term. The cosine value comes from the matrix entry which we are pushing to zero. We have some angle: $\sin\phi \propto f_3^*, \cos\phi \propto d_3^*$, which can be normalized:
+
+$$
+\sin\phi = \frac{1}{\sqrt{d_2^2 v_3^2 + d_3^2 v_4^2}} d_2 v_3,
+\cos\phi = \frac{1}{\sqrt{d_2^2 v_3^2 + d_3^2 v_4^2}} d_3 v_4
+$$
+
+Apply a RHS rotation matrix block to the 3x2 $A$ matrix block which could be affected.
+
+$$
+\left(\begin{matrix}
+    d_{i-1}^* & x_{i,i+1} \\
+    f_i^* & d_i^* \\
+    0 & f_{i+1}
+\end{matrix}\right)
+=
+\frac{1}{v_3^\prime}
+\left(\begin{matrix}
+    d_{i-1} v_{i+1} & -d_i v_i \\
+    d_{i-1} v_i & d_i v_{i+1} \\
+    0 & f_{i+1}
+\end{matrix}\right)
+$$
+
+Apply:
+
+$$
+\frac{1}{v_3^\prime}
+\left(\begin{matrix}
+    d_{i-1} v_{i+1} & -d_i v_i \\
+    d_{i-1} v_i & d_i v_{i+1} \\
+    0 & f_{i+1}
+\end{matrix}\right)
+\left(\begin{matrix}
+    \cos\phi & -\sin\phi \\
+    \sin\phi & \cos\phi
+\end{matrix}\right)
+$$
+
+We have a block which we are going to persist:
+
+\end{document}
