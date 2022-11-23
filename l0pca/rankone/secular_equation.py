@@ -11,6 +11,19 @@ terms (fitting a psi and phi function).
 from l0pca.util import gather_util
 import tensorflow as tf
 
+def eq_search_eigenvalues_initialize(diag, update_vec):
+    # Broadcast results to update_vec shape, which is expected to use all dims
+    # fully.
+    results = (diag[..., :-1] + diag[..., 1:]) / 2. + (update_vec[:, :, :-1] * 0.)
+    return tf.concat(
+        [
+            results,
+            (tf.math.reduce_sum(diag, axis=-1)
+                + tf.square(tf.linalg.norm(update_vec, axis=-1)))[:, :, None],
+        ],
+        axis=-1,
+    )
+
 def eq_search_eigenvalues_iteration(diag, update_vec, initial_estimates):
     psi_values, phi_values = eq_evaluate(diag, update_vec, initial_estimates)
     psi_constant, psi_multiplier = fit_interpolation(
@@ -20,7 +33,8 @@ def eq_search_eigenvalues_iteration(diag, update_vec, initial_estimates):
     # added to the matrix trace.
     phi_diagonal_values = tf.concat(
         [
-            diag[..., 1:],
+            # Broadcast diag matrix to update_vec shape.
+            diag[..., 1:] + (update_vec[:, :, 1:] * 0.),
             # Upper bound where all perturbed eigenvalues go to 0, except for
             # this final one which goes to the trace of the matrix. The use of
             # fitting quadratic values is only to say that the pole of the
@@ -54,7 +68,7 @@ def eq_search_eigenvalues_iteration(diag, update_vec, initial_estimates):
 
 def eq_terms(diag, update_vec, initial_estimates):
     # 2 batch dims are expected.
-    n = tf.shape(diag)[-1]
+    n = diag.shape[-1]
     diag = tf.ensure_shape(diag, [None, None, n])
     update_vec = tf.ensure_shape(update_vec, [None, None, n])
     initial_estimates = tf.ensure_shape(initial_estimates, [None, None, n])
