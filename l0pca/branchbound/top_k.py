@@ -19,6 +19,6 @@ def top_k(M, order, k, y):
         tf.cast((ranking <= stillneed)
         & (count_variables | ((y[:, None] == -1) & (order == tf.range(n)[:, None]))), tf.int32)
     )
-    available_y = tf.math.bincount(weight_lookup, M)[1:]
+    available_y = tf.math.bincount(weight_lookup, M, minlength=n+1, maxlength=n+1)[1:]
 
     return starting_sums + available_y

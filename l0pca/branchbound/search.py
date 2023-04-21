@@ -23,12 +23,12 @@ def new_search_queue(spca):
 def step(spca, queue, best_obj, best_y):
     if queue.size() < CAPACITY:
         _, node_data = queue.dequeue()
-        pri_1, node_1, pri_2, node_2, new_best_obj, new_best_y = node.process_node(spca, node_data)
-        if pri_1 > best_obj:
+        lo_1, pri_1, node_1, lo_2, pri_2, node_2, new_best_obj, new_best_y = node.process_node(spca, node_data)
+        if pri_1 > best_obj and lo_1 != pri_1:
             queue.enqueue([value_to_priority(spca, pri_1), node_1])
-        if pri_2 > best_obj:
+        if pri_2 > best_obj and lo_2 != pri_2:
             queue.enqueue([value_to_priority(spca, pri_2), node_2])
         if new_best_obj > best_obj:
-            return queue, new_best_obj, new_best_y
+            return new_best_obj, new_best_y
         else:
-            return queue, best_obj, best_y
+            return best_obj, best_y

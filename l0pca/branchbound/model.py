@@ -3,13 +3,6 @@ import tensorflow as tf
 DTYPE = tf.float32
 
 def gather_by_column(M, row_perms):
-    lookup = tf.concat(
-        [
-            tf.range(M.shape[0])[:, None, None] + (0 * row_perms[:, :, None]),
-            row_perms[:, :, None],
-        ],
-        axis=2,
-    )
     return tf.gather_nd(M, row_perms[:, :, None], batch_dims=1)
 
 class SpcaTraceType(tf.types.experimental.TraceType):
@@ -38,5 +31,5 @@ class Spca(object):
         self.n = self.cov.shape[0]
         self.k = int(k)
 
-    def __tf_tracing_type__(self, context):
-        return SpcaTraceType(self)
+    # def __tf_tracing_type__(self, context):
+    #     return SpcaTraceType(self)

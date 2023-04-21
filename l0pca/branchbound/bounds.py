@@ -3,6 +3,12 @@ import tensorflow as tf
 import partial_solution
 import top_k
 
+def is_terminal(spca, y):
+    return tf.logical_or(
+        tf.math.reduce_sum(tf.cast(y != 0, tf.int32)) == spca.k,
+        tf.math.reduce_sum(tf.cast(y == 1, tf.int32)) == spca.k,
+    )
+
 def bound_spca(spca, y):
     u = partial_solution.solve_pseudovec(spca, y)
     projection_lb_vars = tf.math.reduce_sum(
@@ -15,6 +21,17 @@ def bound_spca(spca, y):
         )[0]
     )
     projection_lb = projection_lb_vars + projection_lb_stillneed
+
+    # We have just diagonalized the k by k problem.
+    if is_terminal(spca, y):
+        return {
+            'lower': projection_lb,
+            'upper': projection_lb,
+            'lower_spectral_contribution': u ** 2,
+            # This upper_sq_contribution is not correct. Do not use it, because
+            # no cutting of the problem needs to be done.
+            'upper_sq_contribution': u ** 2,
+        }
 
     gershgorin_ub = tf.math.reduce_max(top_k.top_k(spca.cov_abs, spca.cov_perm, spca.k, y))
     frobenius_rows = top_k.top_k(spca.cov_2, spca.cov_perm, spca.k, y)

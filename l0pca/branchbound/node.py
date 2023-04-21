@@ -43,7 +43,12 @@ def process_node(spca, node):
         lambda: y_1,
         lambda: y_2,
     )
-    best_y = tf.math.maximum(y_1_bounds['lower'], y_2_bounds['lower'])
+    if y_1_bounds['lower'] > y_2_bounds['lower']:
+        best_y = y_1_bounds['lower']
+        best_y_instance = y_1
+    else:
+        best_y = y_2_bounds['lower']
+        best_y_instance = y_2
 
     y_1 = tf.concat(
         [
@@ -60,4 +65,4 @@ def process_node(spca, node):
         axis=1,
     )
 
-    return y_1_bounds['upper'], y_1, y_2_bounds['upper'], y_2, best_y, terminate_best_y
+    return y_1_bounds['lower'], y_1_bounds['upper'], y_1, y_2_bounds['lower'], y_2_bounds['upper'], y_2, best_y, best_y_instance

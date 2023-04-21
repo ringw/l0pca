@@ -10,7 +10,7 @@ def solve_with_positive_variables(spca, y):
 
 def solve_pseudovec(spca, y):
     variables = tf.where(y == 1)[:, 0]
-    if variables.shape[0] >= 2:
+    if tf.shape(variables)[0] >= 2:
         # The evec is an optimal, unit-normed linear combination of i variables
         # to maximize sum of variance of the i variables in that direction.
         # Multiply through by sqrt cov in order to synthesize an observation
