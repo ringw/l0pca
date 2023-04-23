@@ -15,6 +15,7 @@ def build_root(spca):
         axis=1,
     )
 
+@tf.function
 def process_node(spca, node):
     y = tf.cast(node[:, 0], tf.int32)
     contribution = node[:, 1]
