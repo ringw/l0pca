@@ -5,8 +5,8 @@ import top_k
 
 def is_terminal(spca, y):
     return tf.logical_or(
-        tf.math.reduce_sum(tf.cast(y != 0, tf.int32)) == spca.k,
-        tf.math.reduce_sum(tf.cast(y == 1, tf.int32)) == spca.k,
+        tf.math.reduce_sum(tf.cast(y != 0, tf.int32), axis=-1) == spca.k,
+        tf.math.reduce_sum(tf.cast(y == 1, tf.int32), axis=-1) == spca.k,
     )
 
 def apply_cut_spca(spca, y, constant_lb, projection_lb, frobenius_sq_rows_ub):
