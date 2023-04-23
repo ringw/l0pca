@@ -28,7 +28,7 @@ y = tf.constant(y)
 
 q = search.new_search_queue(spca)
 best_obj = tf.constant(0., model.DTYPE)
-best_y = tf.zeros([spca.n, 2], model.DTYPE)
+best_y = tf.zeros([spca.n], tf.int32)
 start = time.time()
 for i in range(2000):
     if i == 1:
