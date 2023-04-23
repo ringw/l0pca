@@ -18,7 +18,7 @@ def solve_pseudovec(spca, y):
         # matrix. Multiply through by sqrt cov again in order to take the dot
         # product of each variable with this synthetic variable.
         _, _, evecs = solve_with_positive_variables(spca, y)
-        return tf.squeeze(indexing.index_columns(spca.cov, variables) @ evecs[:, 0:1], axis=1)
+        return tf.squeeze(indexing.index_columns(spca.cov, variables) @ evecs[:, -1:], axis=1)
     else:
         # The eigvec is a linear combination of variables. Multiply through by
         # sqrt cov (which is given by multiplying by the corresponding
