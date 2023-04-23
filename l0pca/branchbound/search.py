@@ -11,24 +11,25 @@ def value_to_priority(spca, value):
     return tf.cast((1. - value / spca.frobenius_norm) * max_priority, tf.int64)
 
 def new_search_queue(spca):
-    root_node = node.build_root(spca)
+    root_node_y, root_node_proj_trace = node.build_root(spca)
     queue = tf.queue.PriorityQueue(
         CAPACITY,
-        [model.DTYPE],
-        [tf.TensorShape([spca.n, 2])],
+        [tf.int32, model.DTYPE],
+        [tf.TensorShape([spca.n]), tf.TensorShape([spca.n])],
     )
-    queue.enqueue([tf.constant(0, tf.int64), root_node])
+    queue.enqueue([tf.constant(0, tf.int64), root_node_y, root_node_proj_trace])
     return queue
 
 def step(spca, queue, best_obj, best_y):
     if queue.size() < CAPACITY:
-        _, node_data = queue.dequeue()
-        lo_1, pri_1, node_1, lo_2, pri_2, node_2, new_best_obj, new_best_y = node.process_node(spca, node_data)
-        if pri_1 > best_obj and lo_1 != pri_1:
-            queue.enqueue([value_to_priority(spca, pri_1), node_1])
-        if pri_2 > best_obj and lo_2 != pri_2:
-            queue.enqueue([value_to_priority(spca, pri_2), node_2])
-        if new_best_obj > best_obj:
-            return new_best_obj, new_best_y
+        _, node_y, node_contribution = queue.dequeue()
+        node_1, bounds_1, proj_1, node_2, bounds_2, proj_2, node_best, node_best_bound = node.process_node(spca, node_y, node_contribution)
+        # Non-terminal node to be added to the queue.
+        if bounds_1[1] > best_obj and bounds_1[0] != bounds_1[1]:
+            queue.enqueue([value_to_priority(spca, bounds_1[1]), node_1, proj_1])
+        if bounds_2[1] > best_obj and bounds_2[0] != bounds_2[1]:
+            queue.enqueue([value_to_priority(spca, bounds_2[1]), node_2, proj_2])
+        if node_best_bound > best_obj:
+            return node_best_bound, node_best
         else:
             return best_obj, best_y

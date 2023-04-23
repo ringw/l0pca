@@ -26,7 +26,13 @@ class Spca(object):
         eigvals, eigvecs = tf.linalg.eigh(self.cov)
         self.eigval = eigvals[-1]
         self.eigvec = eigvecs[:, -1]
+        # Frob norm of the entire n-by-n system should upper-bound any bound
+        # which we produce. We don't know whether the Gershgorin bound is
+        # larger, but then we always take the min of the Gersh and Frob bounds.
+        # This is useful when we want a nonnegative, decreasing "priority" from
+        # the increasing upper bound.
         self.frobenius_norm = tf.norm(self.cov, 'euclidean')
+        self.variance = tf.linalg.diag_part(self.cov)
 
         self.n = self.cov.shape[0]
         self.k = int(k)

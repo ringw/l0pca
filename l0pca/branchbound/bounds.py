@@ -9,30 +9,38 @@ def is_terminal(spca, y):
         tf.math.reduce_sum(tf.cast(y == 1, tf.int32)) == spca.k,
     )
 
-def bound_spca(spca, y):
-    u = partial_solution.solve_pseudovec(spca, y)
+def apply_cut_spca(spca, y, constant_lb, projection_lb, frobenius_sq_rows_ub):
+    contribution_sq_ub = 2*frobenius_sq_rows_ub - spca.variance
+    contribution_sq_lb = constant_lb[..., None]**2 - (constant_lb[..., None]-projection_lb)**2
+    return tf.where(
+        (contribution_sq_ub < contribution_sq_lb) & (y == -1),
+        0,
+        y,
+    )
+
+def bound_spca(spca, y, cut_node=False):
+    stillneed = spca.k - tf.math.reduce_sum(tf.cast(y == 1, tf.int32))
+    # Rank-one projection of the Hermitian problem.
+    proj_trace = partial_solution.solve_pseudovec(spca, y) ** 2
     projection_lb_vars = tf.math.reduce_sum(
-        u ** 2 * tf.cast(y == 1, u.dtype)
+        proj_trace * tf.cast(y == 1, proj_trace.dtype)
     )
     projection_lb_stillneed = tf.math.reduce_sum(
         tf.math.top_k(
-            u ** 2 * tf.cast(y == -1, u.dtype),
-            spca.k - tf.math.reduce_sum(tf.cast(y == 1, tf.int32)),
+            proj_trace * tf.cast(y == -1, proj_trace.dtype),
+            stillneed,
         )[0]
     )
     projection_lb = projection_lb_vars + projection_lb_stillneed
 
     # We have just diagonalized the k by k problem.
     if is_terminal(spca, y):
-        return {
-            'lower': projection_lb,
-            'upper': projection_lb,
-            'lower_spectral_contribution': u ** 2,
-            # This upper_sq_contribution is not correct. Do not use it, because
-            # no cutting of the problem needs to be done.
-            'upper_sq_contribution': u ** 2,
-        }
+        return y, proj_trace, tf.convert_to_tensor([projection_lb, projection_lb])
 
+    trace_ub = tf.squeeze(
+        tf.math.reduce_sum(spca.variance * tf.cast(y == 1, spca.variance.dtype))
+            + tf.math.reduce_sum(tf.math.top_k(spca.variance * tf.cast(y == -1, spca.variance.dtype), stillneed)[0]),
+    )
     gershgorin_ub = tf.math.reduce_max(top_k.top_k(spca.cov_abs, spca.cov_perm, spca.k, y))
     frobenius_rows = top_k.top_k(spca.cov_2, spca.cov_perm, spca.k, y)
     frobenius_ub = tf.math.sqrt(tf.math.reduce_sum(
@@ -41,9 +49,17 @@ def bound_spca(spca, y):
             spca.k,
         )[0],
     ))
-    return {
-        'lower': projection_lb,
-        'upper': tf.math.minimum(gershgorin_ub, frobenius_ub),
-        'lower_spectral_contribution': u ** 2,
-        'upper_sq_contribution': frobenius_rows,
-    }
+    # TODO: Upper bounds can change after filtering out variables in the cut, so
+    # we should have one more iteration of top_k.
+    if cut_node:
+        y = apply_cut_spca(spca, y, projection_lb, proj_trace, frobenius_rows)
+
+    upper_bound = tf.math.reduce_min([trace_ub, gershgorin_ub, frobenius_ub], axis=0)
+    bounds_array = tf.concat(
+        [
+            projection_lb[..., None],
+            upper_bound[..., None],
+        ],
+        axis=-1,
+    )
+    return y, proj_trace, bounds_array
