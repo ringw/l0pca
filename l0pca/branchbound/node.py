@@ -7,15 +7,10 @@ import partial_solution
 def build_root(spca):
     y = -1 * tf.ones(tf.shape(spca.cov)[0], tf.int32)
     v = partial_solution.solve_pseudovec(spca, y)
-    return y, v ** 2
+    return y, bounds.select_next_branch_proj(v ** 2, y)
 
 @tf.function
-def process_node(spca, y, contribution):
-    available_var = tf.where(y == -1)[:, 0]
-    branch_node = available_var[
-        tf.math.argmax(tf.gather(contribution, available_var))
-    ]
-
+def process_node(spca, y, branch_node):
     y_1, contribution, y_1_bounds = bounds.bound_spca(
         spca,
         tf.tensor_scatter_nd_update(

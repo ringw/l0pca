@@ -18,6 +18,9 @@ def apply_cut_spca(spca, y, constant_lb, projection_lb, frobenius_sq_rows_ub):
         y,
     )
 
+def select_next_branch_proj(proj_trace, y):
+    return tf.cast(tf.math.argmax(proj_trace * tf.cast(y == -1, proj_trace.dtype)), tf.int32)
+
 def bound_spca(spca, y, cut_node=False):
     stillneed = spca.k - tf.math.reduce_sum(tf.cast(y == 1, tf.int32))
     # Rank-one projection of the Hermitian problem.
@@ -33,9 +36,11 @@ def bound_spca(spca, y, cut_node=False):
     )
     projection_lb = projection_lb_vars + projection_lb_stillneed
 
-    # We have just diagonalized the k by k problem.
+    # We have just diagonalized the k by k problem. The projection_lb is
+    # complete. It doesn't matter which node we return to "branch" on,
+    # because there is no branching to be done.
     if is_terminal(spca, y):
-        return y, proj_trace, tf.convert_to_tensor([projection_lb, projection_lb])
+        return y, tf.constant(0), tf.convert_to_tensor([projection_lb, projection_lb])
 
     trace_ub = tf.squeeze(
         tf.math.reduce_sum(spca.variance * tf.cast(y == 1, spca.variance.dtype))
@@ -62,4 +67,4 @@ def bound_spca(spca, y, cut_node=False):
         ],
         axis=-1,
     )
-    return y, proj_trace, bounds_array
+    return y, select_next_branch_proj(proj_trace, y), bounds_array
